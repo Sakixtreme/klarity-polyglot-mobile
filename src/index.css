@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-dark: #0B1C28;
+  --color-navy: #112B3C;
+  --color-navy-surface: #18384E;
+  --color-navy-border: #234B68;
+  --color-ocean: #205375;
+  --color-ocean-light: #2B6E9B;
+  --color-sky: #3B98D4;
+  --color-orange: #F66B0E;
+  --color-orange-hover: #E05C06;
+  --color-orange-light: #F88537;
+  --color-peach: #FBAF78;
+  --color-neutral-light: #EFEFEF;
+  --color-neutral-muted: #B8BFC6;
+  --color-neutral-dim: #707882;
+}
