@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Server-side Gemini client
 const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+const ai = apiKey && !apiKey.startsWith('AQ.') ? new GoogleGenAI({ apiKey }) : null;
 if (!apiKey) {
   console.error('GEMINI_API_KEY no está definida; las traducciones están deshabilitadas.');
 } else {
@@ -48,7 +48,7 @@ async function executeTranslation({
   userLanguage?: string;
   counterpartLanguage?: string;
 }) {
-  if (!ai) throw new Error('GEMINI_API_KEY_MISSING');
+  if (!apiKey) throw new Error('GEMINI_API_KEY_MISSING');
 
   const userLang = userLanguage || 'es';
   const targetCounterpart = counterpartLanguage || 'en';
@@ -79,31 +79,68 @@ async function executeTranslation({
   }
 
   let responseText = '';
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.0,
-      },
-    });
-    responseText = response.text?.trim() || '';
-  } catch (err: any) {
-    console.warn('gemini-2.5-flash falló; intentando gemini-2.0-flash:', err?.message);
+  if (apiKey.startsWith('AQ.')) {
+    const parts: Array<Record<string, unknown>> = [{
+      text: `${systemInstruction}\n\n${text ? `Contexto/transcripción: ${text}` : 'Interpreta el audio adjunto.'}`,
+    }];
+    if (audioBase64) {
+      const audioPart = contents.find((item) => item.inlineData)?.inlineData;
+      if (audioPart) parts.push({ inlineData: audioPart });
+    }
+
+    const googleResponse = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { temperature: 0.2 },
+        }),
+      }
+    );
+
+    if (!googleResponse.ok) {
+      const errorBody = await googleResponse.text();
+      console.error('Error de Gemini API:', googleResponse.status, errorBody);
+      throw new Error(`Gemini API respondió ${googleResponse.status}: ${errorBody}`);
+    }
+
+    const googleData = await googleResponse.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    responseText = googleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+  } else {
+    if (!ai) throw new Error('GEMINI_API_KEY_MISSING');
     try {
-      const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
         contents,
         config: {
           systemInstruction,
           temperature: 0.0,
         },
       });
-      responseText = fallbackResponse.text?.trim() || '';
-    } catch (fallbackError: any) {
-      console.error('Fallaron ambos modelos de Gemini:', fallbackError?.message);
-      throw new Error(`Error en los modelos Gemini: ${fallbackError?.message || 'respuesta no disponible'}`);
+      responseText = response.text?.trim() || '';
+    } catch (err: any) {
+      console.warn('gemini-2.5-flash falló; intentando gemini-2.0-flash:', err?.message);
+      try {
+        const fallbackResponse = await ai.models.generateContent({
+          model: 'gemini-2.0-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.0,
+          },
+        });
+        responseText = fallbackResponse.text?.trim() || '';
+      } catch (fallbackError: any) {
+        console.error('Fallaron ambos modelos de Gemini:', fallbackError?.message);
+        throw new Error(`Error en los modelos Gemini: ${fallbackError?.message || 'respuesta no disponible'}`);
+      }
     }
   }
 
@@ -158,7 +195,7 @@ app.post('/api/translate', async (req: Request, res: Response) => {
     if (!text && !audioBase64) {
       return res.status(400).json({ error: 'Debes proporcionar texto o audio para interpretar.' });
     }
-    if (!ai) {
+    if (!apiKey) {
       return res.status(503).json({ error: 'Configura GEMINI_API_KEY en .env para habilitar traducciones.' });
     }
 
