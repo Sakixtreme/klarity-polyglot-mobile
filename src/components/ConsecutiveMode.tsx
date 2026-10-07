@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Square, Send, Play, Loader2, Clock } from 'lucide-react';
+import { Mic, Square, Send, Play, Loader2 } from 'lucide-react';
 import { SupportedLanguage, TranslationSessionItem, InterpretationResult, VoiceGender } from '../types/interpreter';
 import { AudioRecorder, playTTS, toggleTTS, stopTTS, subscribeTTSState, TTSState } from '../utils/audio';
 import { wsTranslationClient } from '../utils/websocket';
@@ -33,11 +33,8 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
   const { isDark } = useTheme();
   const { t } = useAppLanguage();
 
-  const [captureMode, setCaptureMode] = useState<'free' | 'manual'>('free');
-  const [windowSeconds, setWindowSeconds] = useState<10 | 20 | 30 | 60>(20);
   const [isRecording, setIsRecording] = useState<boolean>(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
-  const [silenceDuration, setSilenceDuration] = useState<number>(0); // 0 to 2000 ms
+  const [silenceDuration, setSilenceDuration] = useState<number>(0);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [isContinuousLibreActive, setIsContinuousLibreActive] = useState<boolean>(false);
   const [textInput, setTextInput] = useState<string>('');
@@ -51,14 +48,12 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
 
   const recorderRef = useRef<AudioRecorder | null>(null);
   const recognitionRef = useRef<any>(null);
-  const timerRef = useRef<any>(null);
   const silenceCheckIntervalRef = useRef<any>(null);
   const restartTimeoutRef = useRef<any>(null);
 
   const hasSpokenRef = useRef<boolean>(false);
   const detectedPitchRef = useRef<number | null>(null);
   const lastSpokenTimestampRef = useRef<number>(0);
-  const recordingStartedAtRef = useRef<number>(0);
   const isContinuousLibreActiveRef = useRef<boolean>(false);
   const accumulatedTranscriptRef = useRef<string>('');
 
@@ -83,7 +78,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
   useEffect(() => {
     return () => {
       isContinuousLibreActiveRef.current = false;
-      if (timerRef.current) clearInterval(timerRef.current);
       if (silenceCheckIntervalRef.current) clearInterval(silenceCheckIntervalRef.current);
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
@@ -134,25 +128,15 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
       }
 
       setIsRecording(true);
-      setElapsedSeconds(0);
       setSilenceDuration(0);
       setIsSpeaking(false);
       hasSpokenRef.current = false;
       detectedPitchRef.current = null;
       lastSpokenTimestampRef.current = Date.now();
-      recordingStartedAtRef.current = Date.now();
-
       setStatusMessage(t('listeningStatus'));
-      timerRef.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
-        setElapsedSeconds(elapsed);
-        if (captureMode === 'manual' && elapsed >= windowSeconds) {
-          void stopAndProcessRecording('window_elapsed');
-        }
-      }, 200);
 
       const VOICE_ENERGY_THRESHOLD = 12;
-      const SILENCE_LIMIT_MS = 900;
+      const SILENCE_LIMIT_MS = 2000;
       silenceCheckIntervalRef.current = setInterval(() => {
         if (!recorderRef.current) return;
         const currentVolume = recorderRef.current.getAverageVolume();
@@ -168,7 +152,7 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
           const silenceElapsed = Date.now() - lastSpokenTimestampRef.current;
           setSilenceDuration(Math.min(SILENCE_LIMIT_MS, silenceElapsed));
 
-          if (captureMode === 'free' && silenceElapsed >= SILENCE_LIMIT_MS) {
+          if (silenceElapsed >= SILENCE_LIMIT_MS) {
             if (silenceCheckIntervalRef.current) {
               clearInterval(silenceCheckIntervalRef.current);
               silenceCheckIntervalRef.current = null;
@@ -185,11 +169,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
   };
 
   const scheduleNextCapture = () => {
-    if (captureMode === 'manual') {
-      isContinuousLibreActiveRef.current = false;
-      setIsContinuousLibreActive(false);
-      return;
-    }
     if (!isContinuousLibreActiveRef.current) return;
     if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
     restartTimeoutRef.current = setTimeout(() => {
@@ -199,10 +178,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
   };
 
   const stopAndProcessRecording = async (triggerReason?: string) => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
     if (silenceCheckIntervalRef.current) {
       clearInterval(silenceCheckIntervalRef.current);
       silenceCheckIntervalRef.current = null;
@@ -246,7 +221,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
           mode: 'consecutive',
           userLanguage,
           counterpartLanguage,
-          windowSeconds: null,
           onResult: (result) => {
             const durationMs = Date.now() - startTime;
             setLastResult(result);
@@ -287,6 +261,7 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
             console.error('Error text translation:', err);
             setStatusMessage('Error: ' + err.message);
             setIsProcessing(false);
+            scheduleNextCapture();
           },
         });
         return;
@@ -302,7 +277,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
         mode: 'consecutive',
         userLanguage,
         counterpartLanguage,
-        windowSeconds: null,
         onResult: (result) => {
           const durationMs = Date.now() - startTime;
           setLastResult(result);
@@ -343,15 +317,7 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
           console.error('Error processing audio:', err);
           setStatusMessage('Error: ' + (err?.message || 'Error servidor'));
           setIsProcessing(false);
-
-          if (isContinuousLibreActiveRef.current) {
-            if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-            restartTimeoutRef.current = setTimeout(() => {
-              if (isContinuousLibreActiveRef.current) {
-                startConsecutiveRecording();
-              }
-            }, 800);
-          }
+          scheduleNextCapture();
         },
       });
     } catch (err: any) {
@@ -404,7 +370,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
         mode: 'consecutive',
         userLanguage,
         counterpartLanguage,
-        windowSeconds: null,
         onResult: (result) => {
           const durationMs = Date.now() - startTime;
           setLastResult(result);
@@ -458,36 +423,15 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
             : 'border-slate-300 bg-white'
         }`}
       >
-        {/* Capture mode and fixed listening window */}
+        {/* Free capture mode is always active. */}
         <div
           className={`pb-2 mb-2 border-b transition-colors ${
             isDark ? 'border-navy-border/80' : 'border-slate-200'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className={`text-xs font-semibold ${isDark ? 'text-neutral-light' : 'text-navy'}`}>{t('captureMode')}</span>
-            <button
-              type="button"
-              disabled={isRecording || isProcessing}
-              aria-pressed={captureMode === 'free'}
-              onClick={() => setCaptureMode((current) => current === 'free' ? 'manual' : 'free')}
-              className="min-h-[30px] rounded-lg border border-orange/50 px-3 text-[11px] font-bold text-orange disabled:opacity-50"
-            >
-              {captureMode === 'free' ? t('freeMode') : t('manualMode')}
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-1.5" role="group" aria-label={t('windowDuration')}>
-            <span className="mr-auto text-[10px] text-slate-500">{t('windowDuration')}</span>
-            {([10, 20, 30, 60] as const).map((seconds) => (
-              <button
-                key={seconds}
-                type="button"
-                disabled={isRecording || isProcessing || captureMode === 'free'}
-                aria-pressed={windowSeconds === seconds}
-                onClick={() => setWindowSeconds(seconds)}
-                className={`min-h-[29px] min-w-[39px] rounded-md border px-2 text-[10px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${windowSeconds === seconds && captureMode === 'manual' ? 'border-orange bg-orange text-white' : isDark ? 'border-navy-border text-neutral-muted' : 'border-slate-300 text-slate-600'}`}
-              >{seconds}s</button>
-            ))}
+            <span className={`text-xs font-semibold ${isDark ? 'text-neutral-light' : 'text-navy'}`}>{t('freeMode')}</span>
+            <span className="text-[10px] text-slate-500">2.0s {t('pauseDetected')}</span>
           </div>
         </div>
 
@@ -518,31 +462,19 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
                 <Mic className="h-7 w-7" />
               </button>
             ) : (
-              <>
-                <button
-                  onClick={() => stopAndProcessRecording('manual_force')}
-                  className="min-h-[48px] px-3.5 rounded-xl bg-orange hover:bg-orange-hover text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all z-10"
-                  title="Traducir lo escuchado hasta ahora (Ideal para lugares con ruido)"
-                  aria-label="Traducir ahora"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Traducir ahora</span>
-                </button>
-
-                <button
-                  onClick={handleStopSession}
-                  className="relative min-h-[64px] min-w-[64px] rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/40 active:scale-95 transition-all"
-                  title="Detener sesión"
-                  aria-label="Detener sesión"
-                >
-                  <Square className="h-6 w-6 fill-white" />
-                </button>
-              </>
+              <button
+                onClick={handleStopSession}
+                className="relative min-h-[64px] min-w-[64px] rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/40 active:scale-95 transition-all"
+                title="Detener interpretación"
+                aria-label="Detener interpretación"
+              >
+                <Square className="h-6 w-6 fill-white" />
+              </button>
             )}
           </div>
 
           {/* Live Silence 2s Detection Visual Meter */}
-          {isRecording && captureMode === 'free' && (
+          {isRecording && (
             <div className="mt-2.5 w-full max-w-[220px] mx-auto text-center space-y-1">
               {isSpeaking ? (
                 <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 animate-pulse">
@@ -553,12 +485,12 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-[10px] font-bold text-orange">
                     <span>{t('pauseDetected')}</span>
-                    <span className="tabular-nums">{(silenceDuration / 1000).toFixed(1)}s / 1.0s</span>
+                    <span className="tabular-nums">{(silenceDuration / 1000).toFixed(1)}s / 2.0s</span>
                   </div>
                   <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-navy-dark overflow-hidden">
                     <div
                       className="h-full bg-orange transition-all duration-75 rounded-full"
-                      style={{ width: `${Math.min(100, (silenceDuration / 1000) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (silenceDuration / 2000) * 100)}%` }}
                     />
                   </div>
                 </div>
@@ -566,19 +498,6 @@ export const ConsecutiveMode: React.FC<ConsecutiveModeProps> = ({
             </div>
           )}
 
-          {/* Elapsed time in Free mode, remaining window in Manual mode */}
-          {isRecording && (
-            <div className="mt-2 space-y-1">
-              <span className="text-[10px] text-slate-500">{captureMode === 'manual' ? t('remaining') : t('elapsed')}</span>
-              <div
-                className={`text-xl font-bold tabular-nums ${
-                  isDark ? 'text-neutral-light' : 'text-navy'
-                }`}
-              >
-                {captureMode === 'manual' ? Math.max(0, windowSeconds - elapsedSeconds) : elapsedSeconds}s
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Text Input Row */}

@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 
 dotenv.config();
@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = Number(process.env.PORT) || 8080;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -21,11 +21,13 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Server-side Gemini client
 const apiKey = process.env.GEMINI_API_KEY || '';
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+if (!apiKey) {
+  console.error('GEMINI_API_KEY no está definida; las traducciones están deshabilitadas.');
+} else {
+  console.log('GEMINI_API_KEY está configurada.');
+}
 
 const SUPPORTED_LANG_CODES = ['es', 'en', 'fr', 'pt', 'de', 'ja', 'zh', 'ar', 'ko', 'it', 'ru'];
-
-// Store last detected external language in memory for continuous session flow
-let lastDetectedExternalLanguage: string = 'en';
 
 /**
  * Core Translation Executor using Google 3.5 Translate / Flash Preview
@@ -51,31 +53,26 @@ async function executeTranslation({
   const userLang = userLanguage || 'es';
   const targetCounterpart = counterpartLanguage || 'en';
 
-  const systemInstruction = `# ROL Y MISIÓN
-Eres el motor ultrarrápido de interpretación bidireccional en tiempo real para la aplicación "Klarity Consecutiva". Tu prioridad absoluta es la mínima latencia y la precisión inmediata sin frases introductorias ni rellenos.
-
-# REGLA ESTRICTA DE SILENCIO (NO RUIDO NI ALUCINACIONES)
-Si la entrada contiene únicamente silencio, murmullos incomprensibles, respiración o ruido de fondo de reunión, responde estrictamente:
-NO_SPEECH
-
-# IDIOMAS COMPATIBLES (11)
-Español (es), Inglés (en), Francés (fr), Portugués (pt), Alemán (de), Japonés (ja), Chino Mandarín (zh), Árabe (ar), Coreano (ko), Italiano (it), Ruso (ru).
-
-# FORMATO DE SALIDA (ULTRA-LIGERO)
-Responde EXCLUSIVAMENTE con una sola línea delimitada por "||":
-[CODIGO_ORIGEN]>[CODIGO_DESTINO] || [TRADUCCIÓN_DIRECTA]`;
+  const systemInstruction = `Eres un intérprete bidireccional de baja latencia. Idiomas permitidos: ${SUPPORTED_LANG_CODES.join(', ')}. Detecta el idioma hablado. Si está en ${userLang}, traduce directamente a ${targetCounterpart}; en otro idioma permitido, traduce a ${userLang}. No agregues introducciones ni explicaciones. Si percibes voz inteligible, nunca respondas vacío: traduce todo lo que entiendas y conserva los fragmentos inciertos de forma prudente. Responde únicamente con [CODIGO_ORIGEN]>[CODIGO_DESTINO] || [TRADUCCIÓN]. Responde exactamente NO_SPEECH solo si no hay voz inteligible.`;
 
   const contents: any[] = [];
   if (audioBase64) {
-    let cleanMimeType = mimeType || 'audio/webm';
-    if (cleanMimeType.includes('mp4') || cleanMimeType.toLowerCase().includes('aac')) cleanMimeType = 'audio/mp4';
-    else if (cleanMimeType.includes('wav')) cleanMimeType = 'audio/wav';
+    const requestedMimeType = (mimeType || 'audio/webm').split(';', 1)[0].trim().toLowerCase();
+    const cleanMimeType = requestedMimeType === 'audio/x-wav'
+      ? 'audio/wav'
+      : ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/wav'].includes(requestedMimeType)
+        ? requestedMimeType
+        : 'audio/webm';
+    console.log('Audio recibido para traducción:', {
+      bytes: Buffer.byteLength(audioBase64, 'base64'),
+      mimeType: cleanMimeType,
+    });
 
     contents.push({
       inlineData: { mimeType: cleanMimeType, data: audioBase64 },
     });
     contents.push({
-      text: 'Interpreta de inmediato el audio en formato [CODIGO_ORIGEN]>[CODIGO_DESTINO] || [TRADUCCIÓN_DIRECTA]. Si solo hay ruido o silencio responde NO_SPEECH.',
+      text: `Interpreta el audio completo. Devuelve [CODIGO_ORIGEN]>[CODIGO_DESTINO] || [TRADUCCIÓN]. Si no hay voz inteligible, responde NO_SPEECH.${text ? ` La transcripción automática orientativa es: "${text}".` : ''}`,
     });
   } else {
     contents.push({ text: text || '' });
@@ -93,40 +90,46 @@ Responde EXCLUSIVAMENTE con una sola línea delimitada por "||":
     });
     responseText = response.text?.trim() || '';
   } catch (err: any) {
-    console.warn('Fallback a gemini-2.0-flash:', err?.message);
-    const fallbackResponse = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.0,
-      },
-    });
-    responseText = fallbackResponse.text?.trim() || '';
+    console.warn('gemini-2.5-flash falló; intentando gemini-2.0-flash:', err?.message);
+    try {
+      const fallbackResponse = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.0,
+        },
+      });
+      responseText = fallbackResponse.text?.trim() || '';
+    } catch (fallbackError: any) {
+      console.error('Fallaron ambos modelos de Gemini:', fallbackError?.message);
+      throw new Error(`Error en los modelos Gemini: ${fallbackError?.message || 'respuesta no disponible'}`);
+    }
   }
 
-  if (!responseText || responseText.includes('NO_SPEECH') || responseText.length < 2) {
+  console.log('Respuesta cruda de Gemini:', responseText);
+  if (responseText.trim().toUpperCase() === 'NO_SPEECH') {
+    console.log('Respuesta procesada para el cliente:', { isSilent: true });
     return { isSilent: true };
+  }
+  if (!responseText) {
+    responseText = text?.trim() || 'No se pudo obtener una traducción del audio.';
   }
 
   let detectedSource = userLang;
   let detectedTarget = targetCounterpart;
   let translatedText = responseText;
 
-  if (responseText.includes('||')) {
-    const parts = responseText.split('||');
-    const langPart = parts[0].trim();
-    translatedText = parts.slice(1).join('||').trim();
-    const langMatch = langPart.match(/([a-z]{2})\s*>\s*([a-z]{2})/i);
-    if (langMatch) {
-      detectedSource = langMatch[1].toLowerCase();
-      detectedTarget = langMatch[2].toLowerCase();
-    }
+  const formattedResponse = responseText.match(/^([a-z]{2})\s*>\s*([a-z]{2})\s*\|\|\s*([\s\S]+)$/i);
+  if (formattedResponse) {
+    detectedSource = formattedResponse[1].toLowerCase();
+    detectedTarget = formattedResponse[2].toLowerCase();
+    translatedText = formattedResponse[3].trim() || responseText;
   }
 
   const isUserSpeaking = detectedSource === userLang;
 
-  return {
+  const processedResult = {
     isSilent: false,
     detected_source_language: detectedSource,
     target_language: detectedTarget,
@@ -136,6 +139,8 @@ Responde EXCLUSIVAMENTE con una sola línea delimitada por "||":
     translated_subtitles: translatedText,
     ssml_or_tts_text: translatedText,
   };
+  console.log('Respuesta procesada para el cliente:', processedResult);
+  return processedResult;
 }
 
 // HTTP Translation endpoint
