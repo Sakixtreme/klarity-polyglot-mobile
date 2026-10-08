@@ -87,9 +87,6 @@ async function executeTranslation({
     'Content-Type': 'application/json',
     'x-goog-api-key': apiKey,
   };
-  if (apiKey.startsWith('AQ.')) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
 
   if (isAqKey) {
     const parts: Array<Record<string, unknown>> = [{
