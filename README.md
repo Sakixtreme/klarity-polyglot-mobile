@@ -1,6 +1,6 @@
 # Klarity Polyglot
 
-Intérprete consecutivo móvil basado en el prototipo creado en Google AI Studio. Incluye una interfaz React 19, servidor Express, Gemini 2.5 Flash, detección de voz y un endpoint WebSocket.
+Intérprete móvil basado en el prototipo creado en Google AI Studio. Incluye modos consecutivo, simultáneo y cara a cara, una interfaz React 19, servidor Express, Gemini y un endpoint WebSocket.
 
 ## Requisitos
 
@@ -29,4 +29,4 @@ npm run lint
 npm run build
 ```
 
-El modo de síntesis utiliza las voces disponibles en el navegador. El modo automático estima el tono del hablante y no identifica su género de forma fiable.
+El modo consecutivo detecta pausas de 2 segundos; el modo simultáneo usa el reconocimiento de voz continuo del navegador y el modo cara a cara permite interpretación Push-to-Talk. La síntesis utiliza las voces disponibles en el navegador. El modo automático estima el tono del hablante y no identifica su género de forma fiable.

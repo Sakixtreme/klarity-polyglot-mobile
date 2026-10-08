@@ -40,6 +40,7 @@ async function executeTranslation({
   mode = 'consecutive',
   userLanguage = 'es',
   counterpartLanguage = 'en',
+  speakerTargetOverride,
 }: {
   text?: string;
   audioBase64?: string;
@@ -47,6 +48,7 @@ async function executeTranslation({
   mode?: string;
   userLanguage?: string;
   counterpartLanguage?: string;
+  speakerTargetOverride?: 'user' | 'counterpart';
 }) {
   if (!apiKey) throw new Error('GEMINI_API_KEY_MISSING');
 
@@ -79,7 +81,17 @@ async function executeTranslation({
   }
 
   let responseText = '';
+  const isAqKey = apiKey.startsWith('AQ.');
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-goog-api-key': apiKey,
+  };
   if (apiKey.startsWith('AQ.')) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  if (isAqKey) {
     const parts: Array<Record<string, unknown>> = [{
       text: `${systemInstruction}\n\n${text ? `Contexto/transcripción: ${text}` : 'Interpreta el audio adjunto.'}`,
     }];
@@ -88,20 +100,14 @@ async function executeTranslation({
       if (audioPart) parts.push({ inlineData: audioPart });
     }
 
-    const googleResponse = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { temperature: 0.2 },
-        }),
-      }
-    );
+    const googleResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { temperature: 0.2 },
+      }),
+    });
 
     if (!googleResponse.ok) {
       const errorBody = await googleResponse.text();
@@ -171,7 +177,7 @@ async function executeTranslation({
     detected_source_language: detectedSource,
     target_language: detectedTarget,
     mode,
-    speaker_target: isUserSpeaking ? 'user' : 'counterpart',
+    speaker_target: speakerTargetOverride || (isUserSpeaking ? 'user' : 'counterpart'),
     original_transcription: text || `[Audio ${detectedSource.toUpperCase()}]`,
     translated_subtitles: translatedText,
     ssml_or_tts_text: translatedText,
@@ -190,6 +196,7 @@ app.post('/api/translate', async (req: Request, res: Response) => {
       mode = 'consecutive',
       userLanguage = 'es',
       counterpartLanguage = 'en',
+      speakerTargetOverride,
     } = req.body;
 
     if (!text && !audioBase64) {
@@ -206,6 +213,7 @@ app.post('/api/translate', async (req: Request, res: Response) => {
       mode,
       userLanguage,
       counterpartLanguage,
+      speakerTargetOverride,
     });
 
     if (!result || result.isSilent) return res.json({ isSilent: true });
@@ -236,6 +244,7 @@ wss.on('connection', (ws: WebSocket) => {
         mode,
         userLanguage,
         counterpartLanguage,
+        speakerTargetOverride,
       } = msg;
 
       const startTime = Date.now();
@@ -246,6 +255,7 @@ wss.on('connection', (ws: WebSocket) => {
         mode,
         userLanguage,
         counterpartLanguage,
+        speakerTargetOverride,
       });
 
       if (!result || result.isSilent) {
@@ -286,7 +296,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     status: 'ok',
     configured: Boolean(apiKey),
     languages: SUPPORTED_LANG_CODES,
-    modes: ['consecutive'],
+    modes: ['consecutive', 'simultaneous', 'facetoface'],
     model: 'gemini-2.5-flash',
     streaming: 'WebSocket (/api/ws-translate)',
     version: '1.2.0',

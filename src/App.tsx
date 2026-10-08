@@ -7,6 +7,8 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { LanguageSelector } from './components/LanguageSelector';
 import { ConsecutiveMode } from './components/ConsecutiveMode';
+import { SimultaneousMode } from './components/SimultaneousMode';
+import { FaceToFaceMode } from './components/FaceToFaceMode';
 import { TranscriptFeed } from './components/TranscriptFeed';
 import { SettingsModal } from './components/SettingsModal';
 import { SupportedLanguage, TranslationSessionItem, AppTab, VoiceGender } from './types/interpreter';
@@ -130,6 +132,36 @@ function AppContent() {
                 setIsWorking={setIsWorking}
               />
             </div>
+          )}
+
+          {activeTab === 'simultaneous' && (
+            <div className="space-y-3">
+              <SimultaneousMode
+                userLanguage={userLanguage}
+                counterpartLanguage={counterpartLanguage}
+                voiceGender={voiceGender}
+                autoPlayAudio={autoPlayAudio}
+                onAddSessionItem={handleAddSessionItem}
+                onLanguageDetected={handleLanguageDetected}
+                isProcessing={isProcessing}
+                setIsProcessing={setIsProcessing}
+                setIsWorking={setIsWorking}
+              />
+            </div>
+          )}
+
+          {activeTab === 'facetoface' && (
+            <FaceToFaceMode
+              userLanguage={userLanguage}
+              counterpartLanguage={counterpartLanguage}
+              voiceGender={voiceGender}
+              autoPlayAudio={autoPlayAudio}
+              onAddSessionItem={handleAddSessionItem}
+              onLanguageDetected={handleLanguageDetected}
+              isProcessing={isProcessing}
+              setIsProcessing={setIsProcessing}
+              setIsWorking={setIsWorking}
+            />
           )}
 
           {activeTab === 'history' && (

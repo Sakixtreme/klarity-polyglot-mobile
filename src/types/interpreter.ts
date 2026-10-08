@@ -11,8 +11,8 @@ export type SupportedLanguage =
   | 'it'
   | 'ru';
 
-export type InterpretationMode = 'consecutive';
-export type AppTab = 'consecutive' | 'history';
+export type InterpretationMode = 'consecutive' | 'simultaneous';
+export type AppTab = 'consecutive' | 'simultaneous' | 'facetoface' | 'history';
 export type SpeakerTarget = 'user' | 'counterpart';
 export type VoiceGender = 'female' | 'male' | 'automatic';
 

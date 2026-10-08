@@ -178,7 +178,27 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-
+      <div className="px-2.5 pb-2">
+        <div className={`grid grid-cols-3 gap-1 rounded-lg border p-1 text-xs font-medium ${isDark ? 'border-navy-border bg-navy-dark' : 'border-slate-300 bg-slate-200'}`}>
+          {(['consecutive', 'simultaneous', 'facetoface'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              aria-pressed={activeTab === tab}
+              className={`min-h-[36px] rounded-md px-1 text-center truncate transition-colors ${
+                activeTab === tab
+                  ? 'bg-orange text-white font-semibold shadow-sm'
+                  : isDark
+                    ? 'text-neutral-muted hover:text-neutral-light'
+                    : 'text-slate-600 hover:text-navy'
+              }`}
+            >
+              {t(tab)}
+            </button>
+          ))}
+        </div>
+      </div>
     </header>
   );
 };
