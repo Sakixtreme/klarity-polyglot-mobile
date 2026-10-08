@@ -82,7 +82,7 @@ async function executeTranslation({
 
   let responseText = '';
   const isAqKey = apiKey.startsWith('AQ.');
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-goog-api-key': apiKey,
@@ -129,10 +129,10 @@ async function executeTranslation({
       });
       responseText = response.text?.trim() || '';
     } catch (err: any) {
-      console.warn('gemini-2.5-flash falló; intentando gemini-2.0-flash:', err?.message);
+      console.warn('gemini-2.5-flash falló; intentando gemini-3.8-flash:', err?.message);
       try {
         const fallbackResponse = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
+          model: 'gemini-3.8-flash',
           contents,
           config: {
             systemInstruction,
